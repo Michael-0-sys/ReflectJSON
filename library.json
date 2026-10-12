@@ -1,0 +1,18 @@
+{
+  "name": "ReflectJSON",
+  "version": "1.0.0",
+  "description": "Fast JSON writer and reader for microcontrollers with struct reflection, Kotlin-style config and pretty printing (C++17).",
+  "keywords": "json, reflection, serialization, parser, writer, struct, embedded",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Michael-0-sys/ReflectJSON.git"
+  },
+  "authors": [
+    { "name": "Michael", "email": "michi.fu@quickline.ch", "maintainer": true }
+  ],
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "frameworks": "arduino",
+  "platforms": ["raspberrypi", "espressif32", "teensy", "renesas-ra"],
+  "build": { "flags": ["-std=gnu++17"], "unflags": ["-std=gnu++11", "-std=gnu++14"] },
+  "headers": "ReflectJSON.h"
+}

@@ -1,0 +1,47 @@
+#######################################
+# Syntax Coloring Map For ReflectJSON
+#######################################
+
+# Datatypes (KEYWORD1)
+JSONwriter	KEYWORD1
+JSONreader	KEYWORD1
+JsonConfig	KEYWORD1
+JsonFixed	KEYWORD1
+JsonNumber	KEYWORD1
+SearchMode	KEYWORD1
+JsonWriterStatus	KEYWORD1
+JsonReaderStatus	KEYWORD1
+
+# Methods and functions (KEYWORD2)
+write	KEYWORD2
+startObject	KEYWORD2
+endObject	KEYWORD2
+startArray	KEYWORD2
+endArray	KEYWORD2
+finish	KEYWORD2
+resetJSON	KEYWORD2
+getJSON	KEYWORD2
+getJSONSize	KEYWORD2
+parse	KEYWORD2
+read	KEYWORD2
+readExact	KEYWORD2
+hasError	KEYWORD2
+hasReadError	KEYWORD2
+hasParseError	KEYWORD2
+getErrorCode	KEYWORD2
+getErrorMsg	KEYWORD2
+getErrorPath	KEYWORD2
+setConfig	KEYWORD2
+getConfig	KEYWORD2
+strict	KEYWORD2
+cstr	KEYWORD2
+fn	KEYWORD2
+fx	KEYWORD2
+
+# Constants and macros (LITERAL1)
+REFLECT	LITERAL1
+MEMBER	LITERAL1
+MEMBER_AS	LITERAL1
+MatchByKey	LITERAL1
+MatchByType	LITERAL1
+JSON_PRETTY_INDENT	LITERAL1
