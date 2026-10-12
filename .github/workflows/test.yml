@@ -10,24 +10,30 @@ jobs:
     strategy:
       matrix:
         cxx: [g++, clang++]
+
     steps:
       - uses: actions/checkout@v4
+
       - name: Tests (ASan + UBSan)
         run: make -C test CXX=${{ matrix.cxx }}
+
       - name: Examples (PC build with Arduino stand-in)
         run: make -C test examples CXX=${{ matrix.cxx }}
 
   arduino-lint:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: arduino/arduino-lint-action@v2
         with:
-          library-manager: update
+          library-manager: submit
           compliance: specification
 
   compile-examples:
     runs-on: ubuntu-latest
+
     strategy:
       fail-fast: false
       matrix:
@@ -36,11 +42,14 @@ jobs:
             platforms: |
               - name: rp2040:rp2040
                 source-url: https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
+
           - fqbn: esp32:esp32:esp32s3
             platforms: |
               - name: esp32:esp32
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: arduino/compile-sketches@v1
         with:
           fqbn: ${{ matrix.board.fqbn }}
