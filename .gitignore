@@ -1,0 +1,7 @@
+test/test_all
+test/example_*
+*.o
+.vscode/
+.idea/
+.pio/
+build/
