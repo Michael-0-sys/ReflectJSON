@@ -732,12 +732,6 @@ private:
       _storage.writerPos += n;
       return p;
     }
-    // Write two digits ("00".."99") with byte access. memcpy would be a real function call on small MCUs.
-    static FORCE_INLINE void putPair(char *p, const uint32_t v){
-      const char *const d = JSON_DIGIT_PAIRS + v * 2;
-      p[0] = d[0];
-      p[1] = d[1];
-    }
     inline void appendRaw(const char *s, const size_t n){
       char *const p = reserve(n);
       if(p) memcpy(p, s, n);
@@ -810,159 +804,34 @@ private:
       appendChar('"');
     }
 
+    // Numbers: shared formatting from ReflectCore.h (identical output in ReflectINI).
+    // Written directly into the output buffer if there is enough room, otherwise through a small
+    // temporary buffer (appendRaw() then reports JSON_ERR_NO_SPACE as before).
+    FORCE_INLINE char *numberTarget(){
+      return (_storage.limit - _storage.writerPos >= REFLECT_NUM_BUF_SIZE) ? _storage.jsonOut + _storage.writerPos : nullptr;
+    }
     template<typename I>
     inline void appendInt(const I v){
       static_assert(std::is_integral_v<I>, "appendInt: integral type expected");
-
-      if constexpr (sizeof(I) <= sizeof(uint32_t)){
-        uint32_t mag;
-        if constexpr (std::is_signed_v<I>){
-          if(v < 0){
-            appendChar('-');
-            mag = uint32_t(0) - (uint32_t)(int32_t)v;
-          }else{
-            mag = (uint32_t)v;
-          }
-        }else{
-          mag = (uint32_t)v;
-        }
-        appendUnsigned32(mag);
+      if(char *const p = numberTarget()){
+        _storage.writerPos += reflectFormatInt(v, p);
       }else{
-        uint64_t mag;
-        if constexpr (std::is_signed_v<I>){
-          if(v < 0){
-            appendChar('-');
-            mag = uint64_t(0) - (uint64_t)v;
-          }else{
-            mag = (uint64_t)v;
-          }
-        }else{
-          mag = (uint64_t)v;
-        }
-        appendUnsigned64(mag);
+        char tmp[REFLECT_NUM_BUF_SIZE];
+        appendRaw(tmp, reflectFormatInt(v, tmp));
       }
     }
-    // Digits are written directly into the output buffer (count determined beforehand, only one space check)
-    inline void appendUnsigned32(uint32_t x){
-      // Branching search instead of 9 comparisons: much cheaper on 32-bit MCUs without division/FPU
-      const uint8_t n = (x < 10000u)
-        ? ((x < 100u) ? (uint8_t)(1 + (x >= 10u)) : (uint8_t)(3 + (x >= 1000u)))
-        : ((x < 1000000u) ? (uint8_t)(5 + (x >= 100000u))
-                          : ((x < 100000000u) ? (uint8_t)(7 + (x >= 10000000u)) : (uint8_t)(9 + (x >= 1000000000u))));
-      char *const start = reserve(n);
-      if(!start) return;
-      char *p = start + n;
-
-      while(x >= 100){
-        const uint32_t q = x / 100;
-        const uint32_t r = x - ((q << 6) + (q << 5) + (q << 2));   // x - q*100, without the compiler turning it into a second division
-        p -= 2;
-        putPair(p, r);
-        x = q;
-      }
-      if(x >= 10){
-        p -= 2;
-        putPair(p, x);
-      }else{
-        *--p = char('0' + x);
-      }
-    }
-    inline void appendUnsigned64(uint64_t x){
-      if(x <= 0xFFFFFFFFull){
-        appendUnsigned32((uint32_t)x);
-        return;
-      }
-
-      // from here on at least 10 digits
-      uint8_t n = 10;
-      uint64_t lim = 10000000000ull;
-      while(n < 20 && x >= lim){
-        n++;
-        lim *= 10;
-      }
-
-      char *const start = reserve(n);
-      if(!start) return;
-      char *p = start + n;
-
-      // 64-bit division is slow on 32-bit MCUs: switch to 32 bit as early as possible
-      while(x > 0xFFFFFFFFull){
-        const uint64_t q = x / 100;
-        const uint32_t r = (uint32_t)(x - q * 100);
-        p -= 2;
-        putPair(p, r);
-        x = q;
-      }
-
-      uint32_t y = (uint32_t)x;
-      while(y >= 100){
-        const uint32_t q = y / 100;
-        const uint32_t r = y - q * 100;
-        p -= 2;
-        putPair(p, r);
-        y = q;
-      }
-      if(y >= 10){
-        p -= 2;
-        putPair(p, y);
-      }else{
-        *--p = char('0' + y);
-      }
-    }
-    // Writes '.' and the decimal places (with leading zeros) directly into the buffer
-    inline void appendFraction(uint32_t frac, const uint8_t decimals){
-      char *const p = reserve(size_t(decimals) + 1);
-      if(!p) return;
-      p[0] = '.';
-      for(uint8_t i = decimals; i > 0; i--){
-        const uint32_t q = frac / 10;
-        p[i] = char('0' + (frac - q * 10));
-        frac = q;
-      }
-    }
-    // Writes a number with a fixed number of decimal places (value must be finite).
-    // The integer and fractional parts are rounded separately: value - integer part is exact in floating point,
-    // so there is no rounding error from multiplying large values by 10^n,
-    // and no division by 10^n is needed.
+    // Writes a number with a fixed number of decimal places (value must be finite)
     template<typename F>
-    FORCE_INLINE void appendReal(F value, uint8_t decimals){
-      if(decimals > MAX_FLOAT_PRECISION) decimals = MAX_FLOAT_PRECISION;
-
-      const bool neg = value < 0;
-      if(neg) value = -value;
-
-      const uint32_t p10 = (uint32_t)JSON_POW10[decimals];
-
-      if(value < (F)4.0e9){                          // the integer part safely fits into 32 bit (fast path)
-        uint32_t ip = (uint32_t)value;
-        const F frac = value - (F)ip;
-        uint32_t fp = (uint32_t)(frac * (F)p10 + (F)0.5);
-        if(fp >= p10){                               // round up across the decimal point (0.996 -> 1.00)
-          fp -= p10;
-          ip++;
-        }
-        if(neg && (ip != 0 || fp != 0)) appendChar('-');   // no "-0.00"
-        appendUnsigned32(ip);
-        if(decimals) appendFraction(fp, decimals);
+    inline void appendReal(const F value, const uint8_t decimals){
+      char tmp[REFLECT_NUM_BUF_SIZE];
+      char *const direct = numberTarget();
+      const size_t n = reflectFormatReal(value, decimals, direct ? direct : tmp);
+      if(n == 0){
+        makeError(JsonWriterStatus::JSON_ERR_INVALID_NUMBER);
+      }else if(direct){
+        _storage.writerPos += n;
       }else{
-        appendRealLarge(value, neg, decimals, p10);
-      }
-    }
-    // Rare path (large values), deliberately not inline
-    template<typename F>
-    void appendRealLarge(const F value, const bool neg, const uint8_t decimals, const uint32_t p10){
-      const F scaled = value * (F)p10 + (F)0.5;
-      if(scaled < (F)1.8e19){                         // fits into 64 bit
-        const uint64_t total = (uint64_t)scaled;
-        if(neg) appendChar('-');
-        const uint64_t ip = decimals ? total / p10 : total;
-        appendUnsigned64(ip);
-        if(decimals) appendFraction((uint32_t)(total - ip * p10), decimals);
-      }else{
-        // Huge values: exponential notation is valid JSON
-        char buf[32];
-        const int n = snprintf(buf, sizeof(buf), "%s%.*g", neg ? "-" : "", (int)(sizeof(F) <= 4 ? 9 : 17), (double)value);
-        if(n > 0 && n < (int)sizeof(buf)) appendRaw(buf, size_t(n)); else makeError(JsonWriterStatus::JSON_ERR_INVALID_NUMBER);
+        appendRaw(tmp, n);
       }
     }
   ENDREGION()

@@ -11,4 +11,4 @@
 #include "ReflectJSON_writer.h"
 #include "ReflectJSON_reader.h"
 
-#define REFLECTJSON_VERSION "1.0.0"
+#define REFLECTJSON_VERSION "1.1.0"

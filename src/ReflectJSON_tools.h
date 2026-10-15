@@ -7,41 +7,10 @@
 
 #pragma once
 
-#define PM5_PRAGMA(x) _Pragma(#x)
-
-#if defined(_MSC_VER)
-  #define REGION(name)   PM5_PRAGMA(region name)
-  #define ENDREGION()    PM5_PRAGMA(endregion)
-#else
-  #define REGION(name)   /* nothing */
-  #define ENDREGION()    /* nothing */
-#endif
-
-#if defined(ESP8266) || defined(ARDUINO_ARCH_AVR) || defined(ARDUINO_ARCH_SAM)  || \
-    defined(ARDUINO_ARCH_SAMD) || defined(ARDUINO_ARCH_STM32)
-  #error "JSONWriter/JSONReader requires a modern C++17-capable Arduino core (ESP32, RP2350/RP2040, Teensy 3.x). ESP8266, AVR, SAM/SAMD and STM32 Arduino cores are not supported."
-#endif
-
-#include <type_traits>
-#include <stdint.h>
-#include <stddef.h>
-#include <string.h>
-#include <stdio.h>
-#include <climits>
-#include <limits>
-#include <cmath>
-#include <utility>
-#include <new>
-
-#if defined(__has_include)
-  #if __has_include(<optional>)
-    #include <optional>
-    #define JSON_HAS_OPTIONAL 1
-  #endif
-#endif
-
-#ifdef ARDUINO
-#include <Arduino.h>
+// Shared reflection core (REFLECT, MEMBER, fn(), fx(), type traits, cppTypeName ...), also used by ReflectINI
+#include "ReflectCore.h"
+#if !defined(REFLECTCORE_VERSION) || REFLECTCORE_VERSION != 5
+  #error "ReflectCore.h version mismatch: ReflectJSON and ReflectINI must ship the same ReflectCore.h"
 #endif
 
 constexpr size_t JSON_ERR_MAX_MSG = 176;
@@ -50,14 +19,13 @@ constexpr size_t JSON_ERR_MAX_PATH = 15;
 constexpr size_t JSON_ERR_MAX_PATH_LEN = 96;
 constexpr size_t JSON_MAX_OBJECT_KEYS = 25;
 constexpr size_t JSON_MAX_KEYS = 75;
-constexpr size_t JSON_MAX_KEY_LEN = 32;
+constexpr size_t JSON_MAX_KEY_LEN = REFLECT_MAX_KEY_LEN;   // shared with ReflectINI (ReflectCore.h)
 #ifndef JSON_PRETTY_INDENT
 #define JSON_PRETTY_INDENT 2   // spaces per level for getJSON(true)
 #endif
 constexpr size_t JSON_MAX_STRING_LEN = 254;
 
 constexpr size_t ROTATING_STR_BUFFER_COUNT = 10;
-constexpr uint8_t MAX_FLOAT_PRECISION = 8;
 
 static_assert(JSON_MAX_OBJECT_KEYS <= JSON_MAX_KEYS, "JSON_MAX_OBJECT_KEYS must not exceed JSON_MAX_KEYS");
 static_assert(JSON_MAX_KEYS < 255, "JSON_MAX_KEYS must be below 255 (8-bit key indices in the reader)");
@@ -65,43 +33,11 @@ static_assert(JSON_MAX_KEY_LEN <= JSON_MAX_STRING_LEN, "JSON_MAX_KEY_LEN must no
 static_assert(JSON_MAX_STRING_LEN < 60000, "JSON_MAX_STRING_LEN too large");
 static_assert(ROTATING_STR_BUFFER_COUNT >= 1, "ROTATING_STR_BUFFER_COUNT must be >= 1");
 
-
 #if defined(__GNUC__)
     #define JSON_NOINLINE __attribute__((noinline))
-    #define FORCE_INLINE __attribute__((always_inline)) inline
 #else
     #define JSON_NOINLINE
-    #define FORCE_INLINE inline
 #endif
-
-
-REGION(typen)
-  template<typename T>
-  class is_reflectable {
-    private:
-      template<typename U>
-      static auto test(int) -> decltype(
-          std::declval<const U&>().reflect( std::declval<void(*)(const char*, int)>() ),
-          std::true_type{}
-      );
-
-      template<typename>
-      static std::false_type test(...);
-
-    public:
-        static constexpr bool value = decltype(test<T>(0))::value;
-  };
-
-  template<typename T>
-  constexpr bool is_reflectable_v = is_reflectable<T>::value;
-
-  template<typename>
-  inline constexpr bool always_false = false;
-
-  template<typename T>
-  using remove_cvref_t = std::remove_cv_t<std::remove_reference_t<T>>;
-ENDREGION()
-
 
 /**
  * Shared settings for JSONreader AND JSONwriter (corresponds to the Kotlin configuration
@@ -137,226 +73,6 @@ struct JsonConfig {
   }
 };
 
-REGION(REFLECT)
-  template<typename T>
-  struct FieldRef {
-      const char *key;
-      uint8_t keyLen;
-      T value;
-  };
-
-  template<size_t N>
-  constexpr uint8_t litLen(const char (&)[N]) {
-    static_assert(N - 1 <= JSON_MAX_KEY_LEN, "JSON key exceeds JSON_MAX_KEY_LEN");
-    return uint8_t(N - 1);
-  }
-
-  #define MEMBER_GET_MACRO(_1,_2,NAME,...) NAME
-  /**
-  * @brief Declares a reflected struct field.
-  *
-  * Usage:
-  *   MEMBER(field)
-  *   MEMBER(field, expression)         //expression = fx() and fn()
-  *
-  * Expands to a FieldRef containing the key name, key length,
-  * and a reference/expression to the field value.
-  */
-  #define MEMBER(...) MEMBER_GET_MACRO(__VA_ARGS__, MEMBER2, MEMBER1)(__VA_ARGS__)
-
-  #define MEMBER1(field) FieldRef<decltype((this->field))>{ #field, litLen(#field), (this->field) }
-  #define MEMBER2(field, expr) FieldRef<decltype(expr)>{ #field, litLen(#field), (expr) }
-
-  /**
-  * @brief Declares a reflected struct entry with a custom JSON key.
-  *
-  * Usage:
-  *   MEMBER_AS(key, expr)
-  *
-  * The second argument may be any valid expression referring to a value
-  * (e.g. a struct member, an indexed element, or a computed wrapper).
-  *
-  * Expands to a FieldRef containing the provided key, its length,
-  * and the evaluated expression.
-  */
-  #define MEMBER_AS(key, expr) FieldRef<decltype((expr))>{ key, litLen(key), (expr) }
-  /**
-  * @brief Enables reflection for a struct.
-  *
-  * The reflect() function is used by JsonReader, JsonWriter
-  * to iterate over all reflected members.
-  * Defines two reflect() overloads (const and non-const)
-  * that forward all reflected members to the provided callable.
-  *
-  * The visitor parameter has an unusual name (jsonVisitor_) so that it can
-  * never collide with a struct member inside MEMBER(field, expression).
-  *
-  * Usage:
-  *   struct Foo {
-  *     int a;
-  *     float b;
-  *     bool c;
-  *     REFLECT(
-  *       MEMBER(a),                    //adds field (int a) to the JSON with key "a"
-  *       MEMBER(b),                    //adds field (float b) to the JSON with key "b"
-  *       MEMBER_AS("custom key", c)    //adds field (bool c) to the JSON with key "custom key"
-  *     )
-  *   };
-  */
-  #define REFLECT(...) \
-  template<typename JsonVisitorT_> \
-  void reflect(JsonVisitorT_&& jsonVisitor_) const { \
-    jsonVisitor_(__VA_ARGS__); \
-  } \
-  template<typename JsonVisitorT_> \
-  void reflect(JsonVisitorT_&& jsonVisitor_) { \
-    jsonVisitor_(__VA_ARGS__); \
-  }
-ENDREGION()
-
-REGION(numbers)
-  /**
-  * @brief Numeric wrapper for floating-point values with configurable precision.
-  *
-  * JsonNumber is used to control how floating-point values are
-  * serialized to JSON (number of decimal places).
-  *
-  * Typically constructed via fn():
-  *   fn(value, precision)
-  *
-  * This wrapper does not own the value; it stores a reference.
-  */
-  template<typename T>
-  struct JsonNumber {
-    static_assert(std::is_floating_point_v<remove_cvref_t<T>>, "JsonNumber is only for floating point types");
-
-    T& value;             ///< referenced numeric value
-    uint8_t precision;    ///< number of decimal places
-  };
-  template<typename T>
-  JsonNumber(T&, uint8_t) -> JsonNumber<T>;
-
-  /**
-  * @brief Creates a JsonNumber wrapper with the given precision.
-  *
-  * Usage:
-  *   MEMBER(field, fn(field, 2))
-  *
-  * Precision values above MAX_FLOAT_PRECISION (8) are clamped.
-  */
-  template<typename T>
-  FORCE_INLINE JsonNumber<T> fn(T &v, uint8_t precision) {
-    if(precision > MAX_FLOAT_PRECISION){
-      precision = MAX_FLOAT_PRECISION;
-    }
-    return { v, precision };
-  }
-
-
-  /**
-  * @brief Fixed-point numeric wrapper for floating-point values.
-  *
-  * JsonFixed represents floating-point values as fixed-point numbers
-  * with a fixed number of decimal places. In the JSON the value is an
-  * integer (value * 10^precision).
-  *
-  * Typically constructed via fx():
-  *   fx(value, precision)
-  *
-  * This wrapper does not own the value; it stores a reference.
-  */
-  template<typename T>
-  struct JsonFixed {
-    static_assert(std::is_floating_point_v<remove_cvref_t<T>>, "JsonFixed is only for floating point types");
-
-    T& value;             ///< referenced numeric value
-    uint8_t precision;    ///< fixed decimal places
-  };
-  template<typename T>
-  JsonFixed(T&, uint8_t) -> JsonFixed<T>;
-
-  /**
-  * @brief Creates a JsonFixed wrapper with the given precision.
-  *
-  * Usage:
-  *   MEMBER(field, fx(field, 3))
-  *
-  * Precision values above MAX_FLOAT_PRECISION (8) are clamped.
-  */
-  template<typename T>
-  FORCE_INLINE JsonFixed<T> fx(T &v, uint8_t precision) {
-    if(precision > MAX_FLOAT_PRECISION){
-      precision = MAX_FLOAT_PRECISION;
-    }
-    return { v, precision };
-  }
-
-  /**
-  * @brief Returns the default JSON precision for a numeric type.
-  *
-  * Used when no explicit precision is specified.
-  *
-  * float  -> 2
-  * double -> 4
-  */
-  template<typename T>
-  constexpr uint8_t defaultPrecision() {
-    using U = remove_cvref_t<T>;
-    if constexpr (std::is_same_v<U, float>)  return 2;
-    if constexpr (std::is_same_v<U, double>) return 4;
-    return 0;
-  }
-
-  template<typename>
-  struct is_json_fixed : std::false_type {};
-  template<typename T>
-  struct is_json_fixed<JsonFixed<T>> : std::true_type {};
-
-  // std::optional<T> = nullable type (like "T?" in Kotlin)
-  template<typename T>
-  struct is_json_optional : std::false_type {};
-#ifdef JSON_HAS_OPTIONAL
-  template<typename T>
-  struct is_json_optional<std::optional<T>> : std::true_type {};
-#endif
-  template<typename T>
-  inline constexpr bool is_json_optional_v = is_json_optional<remove_cvref_t<T>>::value;
-
-  template<typename T>
-  struct json_optional_value { using type = T; };
-#ifdef JSON_HAS_OPTIONAL
-  template<typename T>
-  struct json_optional_value<std::optional<T>> { using type = T; };
-#endif
-
-  template<typename T>
-  inline constexpr bool is_json_fixed_v = is_json_fixed<T>::value;
-
-  template<typename>
-  struct is_json_number : std::false_type {};
-  template<typename T>
-  struct is_json_number<JsonNumber<T>> : std::true_type {};
-  template<typename T>
-  inline constexpr bool is_json_number_v = is_json_number<T>::value;
-
-  template<typename T>
-  struct unwrap_numeric {
-      using type = remove_cvref_t<T>;
-  };
-
-  template<typename T>
-  struct unwrap_numeric<JsonFixed<T>>  { using type = remove_cvref_t<T>; };
-
-  template<typename T>
-  struct unwrap_numeric<JsonNumber<T>> { using type = remove_cvref_t<T>; };
-
-  template<typename T>
-  struct unwrap_numeric<FieldRef<T>>   { using type = typename unwrap_numeric<T>::type; };
-
-  template<typename T>
-  using unwrap_numeric_t = typename unwrap_numeric<T>::type;
-ENDREGION()
-
 REGION(helper)
   // Marks a value explicitly as a C-style string.
   //
@@ -377,24 +93,9 @@ REGION(helper)
 
   // Internal helper macros (prefixed so they do not collide with other libraries)
   #define JSON_IS_SPACE(c) ((c)==' '||(c)=='\t'||(c)=='\n'||(c)=='\r')
-  #define JSON_IS_DIGIT(c) ((unsigned)((c)-'0') <= 9u)
-  #define JSON_IS_XDIGIT(c) (JSON_IS_DIGIT(c) || (((c) | 0x20) >= 'a' && ((c) | 0x20) <= 'f'))
+  #define JSON_IS_XDIGIT(c) (JSON_IS_DIGIT(c) || (((c) | 0x20) >= 'a' && ((c) | 0x20) <= 'f'))   // JSON_IS_DIGIT: ReflectCore.h
 
-  // 10^0 .. 10^22 are exactly representable as double
-  // JsonNumber/JsonFixed can be constructed directly (without fn()/fx()): always limit the precision
-  inline constexpr uint8_t jsonClampPrecision(const uint8_t p){ return p > MAX_FLOAT_PRECISION ? uint8_t(MAX_FLOAT_PRECISION) : p; }
-  inline constexpr double JSON_POW10[] = {
-    1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,  1e8,  1e9,
-    1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19,
-    1e20, 1e21, 1e22
-  };
-  constexpr uint8_t JSON_POW10_MAX_EXACT = 22;
-
-  // Digit pairs "00".."99" for fast integer output
-  inline constexpr char JSON_DIGIT_PAIRS[201] =
-    "00010203040506070809101112131415161718192021222324252627282930313233343536373839"
-    "40414243444546474849505152535455565758596061626364656667686970717273747576777879"
-    "8081828384858687888990919293949596979899";
+  // JSON_DIGIT_PAIRS: ReflectCore.h (shared number formatting)
 
   // Escape table for JSON strings: 0 = character unchanged,
   // otherwise the letter behind the backslash ('u' means \u00XX).
@@ -413,67 +114,6 @@ REGION(helper)
     }
   };
   inline constexpr JsonEscapeTable JSON_ESC{};
-
-  // Type names (for error messages only)
-  template<typename T>
-  constexpr const char* cppTypeName([[maybe_unused]] bool memberTypeName = false) {
-      using U = unwrap_numeric_t<T>;
-      using R = remove_cvref_t<U>;
-
-      // optional -> name of the contained type
-      if constexpr (is_json_optional_v<R>)
-        return cppTypeName<typename json_optional_value<R>::type>(memberTypeName);
-
-      //string pointers
-      if constexpr (std::is_same_v<R, const char*> || std::is_same_v<R, char*>)
-        return "string";
-
-      //null / pointer
-      if constexpr (std::is_same_v<R, std::nullptr_t>)
-        return "null";
-      else if constexpr (std::is_pointer_v<R>)
-        return cppTypeName<std::remove_pointer_t<R>>(memberTypeName);
-
-      //arrays
-      if constexpr (std::is_array_v<R>) {
-        if(memberTypeName) return "array";
-        return cppTypeName<std::remove_extent_t<R>>(memberTypeName);
-      }
-
-      //floating
-      if constexpr (std::is_same_v<R, float>)  return "float";
-      if constexpr (std::is_same_v<R, double>) return "double";
-
-      //bool
-      if constexpr (std::is_same_v<R, bool>) return "bool";
-
-      if constexpr (std::is_same_v<R, char>) return "char";
-      if constexpr (std::is_same_v<R, signed char>) return "int8_t";
-      if constexpr (std::is_same_v<R, unsigned char>) return "uint8_t";
-
-      //ints
-      if constexpr (std::is_integral_v<R>){
-        if constexpr (std::is_signed_v<R>){
-          if constexpr (sizeof(R) == 1) return "int8_t";
-          if constexpr (sizeof(R) == 2) return "int16_t";
-          if constexpr (sizeof(R) == 4) return "int32_t";
-          if constexpr (sizeof(R) == 8) return "int64_t";
-        }else{
-          if constexpr (sizeof(R) == 1) return "uint8_t";
-          if constexpr (sizeof(R) == 2) return "uint16_t";
-          if constexpr (sizeof(R) == 4) return "uint32_t";
-          if constexpr (sizeof(R) == 8) return "uint64_t";
-        }
-      }
-
-      //enums
-      if constexpr (std::is_enum_v<R>) return "enum";
-
-      //objects
-      if constexpr (is_reflectable_v<R>) return "struct";
-
-      return "unknown";
-  }
 
   // Length of s, but never scan more than maxLen + 1 characters.
   // Return value > maxLen means "too long".
