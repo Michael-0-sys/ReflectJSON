@@ -1,4 +1,10 @@
 # Changelog
+## 1.1.0
+
+- Added shared ReflectCore for compatibility with ReflectINI
+- Shared number formatting for JSON and INI
+- Improved float/double formatting
+- Added ReflectINI interoperability
 
 ## 1.0.0
 
