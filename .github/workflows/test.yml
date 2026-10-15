@@ -56,5 +56,7 @@ jobs:
           platforms: ${{ matrix.board.platforms }}
           libraries: |
             - source-path: ./
+            - source-url: https://github.com/Michael-0-sys/ReflectINI.git
+              version: latest
           sketch-paths: |
             - examples
