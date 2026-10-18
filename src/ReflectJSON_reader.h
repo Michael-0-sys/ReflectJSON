@@ -1329,6 +1329,20 @@ private:
       return true;
     }
 
+    // Collects the key of one REFLECT entry (COMMENT is skipped).
+    // A helper function instead of a nested lambda: GCC 7 (Renesas core, Arduino UNO R4) loses the
+    // captures of a lambda inside a fold expression of a generic variadic lambda
+    // ("uninitialized reference" / "value-initialization of reference type").
+    template<typename F>
+    static FORCE_INLINE void collectStructKey(const F &f, const char **keys, uint8_t *lens, uint8_t &count){
+      if constexpr (is_reflect_comment_v<F>){
+        (void)f; (void)keys; (void)lens; (void)count;
+      }else{
+        keys[count] = f.key;
+        lens[count++] = f.keyLen;
+      }
+    }
+
     template<typename T>
     inline bool checkExtraKeys(const int16_t parentTok, const T &out) {
       const char* structKeys[JSON_MAX_OBJECT_KEYS];
@@ -1336,12 +1350,7 @@ private:
       uint8_t structMemberCount = 0;
 
       out.reflect([&](auto&&... fields) {
-        ([&](const auto &f){
-          if constexpr (!is_reflect_comment_v<decltype(f)>){
-            structKeys[structMemberCount] = f.key;
-            structKeyLen[structMemberCount++] = f.keyLen;
-          }
-        }(fields), ...);
+        (collectStructKey(fields, structKeys, structKeyLen, structMemberCount), ...);
       });
 
       const int16_t end = _storage.tokens[parentTok].end;
