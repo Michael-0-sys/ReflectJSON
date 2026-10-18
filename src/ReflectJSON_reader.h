@@ -1202,6 +1202,15 @@ private:
     // Reads a struct member (the key is searched from hint to the end, then from the start)
     template<typename FR>
     inline bool readMember(const int16_t parentTok, FR &f, uint16_t &hint){
+      if constexpr (is_reflect_comment_v<FR>){
+        (void)parentTok; (void)f; (void)hint;
+        return true;                    // COMMENT(...) is for INI only
+      }else{
+        return readMemberField(parentTok, f, hint);
+      }
+    }
+    template<typename FR>
+    inline bool readMemberField(const int16_t parentTok, FR &f, uint16_t &hint){
       using Member = remove_cvref_t<decltype(f.value)>;
 
       const int16_t valTok = findMember(f.key, f.keyLen, parentTok, hint);
@@ -1275,8 +1284,8 @@ private:
       uint16_t hint = 0;
 
       out.reflect([&](auto&&... fields){
-        static_assert(sizeof...(fields) <= JSON_MAX_OBJECT_KEYS, "Struct exceeds JSON_MAX_OBJECT_KEYS");
-        structMemberCount = sizeof...(fields);
+        static_assert(reflect_member_count_v<decltype(fields)...> <= JSON_MAX_OBJECT_KEYS, "Struct exceeds JSON_MAX_OBJECT_KEYS");
+        structMemberCount = reflect_member_count_v<decltype(fields)...>;
 
         ok = (... && (!_runtimeStatus.hasReadError && readMember(parentTok, fields, hint)));
       });
@@ -1327,7 +1336,12 @@ private:
       uint8_t structMemberCount = 0;
 
       out.reflect([&](auto&&... fields) {
-        ((structKeys[structMemberCount] = fields.key, structKeyLen[structMemberCount++] = fields.keyLen), ...);
+        ([&](const auto &f){
+          if constexpr (!is_reflect_comment_v<decltype(f)>){
+            structKeys[structMemberCount] = f.key;
+            structKeyLen[structMemberCount++] = f.keyLen;
+          }
+        }(fields), ...);
       });
 
       const int16_t end = _storage.tokens[parentTok].end;

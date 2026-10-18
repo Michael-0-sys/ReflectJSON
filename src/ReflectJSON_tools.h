@@ -9,7 +9,7 @@
 
 // Shared reflection core (REFLECT, MEMBER, fn(), fx(), type traits, cppTypeName ...), also used by ReflectINI
 #include "ReflectCore.h"
-#if !defined(REFLECTCORE_VERSION) || REFLECTCORE_VERSION != 5
+#if !defined(REFLECTCORE_VERSION) || REFLECTCORE_VERSION != 6
   #error "ReflectCore.h version mismatch: ReflectJSON and ReflectINI must ship the same ReflectCore.h"
 #endif
 

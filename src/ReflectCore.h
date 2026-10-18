@@ -1,31 +1,46 @@
 /*
- ReflectCore - shared reflection core of ReflectJSON and ReflectINI (Arduino / C++17)
- Copyright (c) 2026 Michael
- Commercial licensing available under separate written agreement.
- See LICENSE and COMMERCIAL.md.
+ReflectCore - shared reflection core of ReflectJSON, ReflectINI and ReflectObserver (Arduino / C++17)
 
- Contains only what BOTH libraries need: REFLECT / MEMBER / MEMBER_AS, FieldRef, fn() / fx(),
- the type traits (optional, numeric wrappers), shared number helpers, cppTypeName() and the number
- formatting of both writers (reflectFormatInt / reflectFormatReal: identical output in JSON and INI).
- Format-specific code lives in ReflectJSON_tools.h / ReflectINI_tools.h.
+Copyright (c) 2026 Michael
 
- IMPORTANT: ReflectJSON and ReflectINI each ship an identical copy of this file. The copies have
- different paths, so #pragma once cannot detect them as the same file: a classic include guard is used.
- REFLECTCORE_VERSION must be increased on every change (in BOTH places in this file: the check before the
- guard and the #define). Every copy checks its own version against the copy included first, and
- ReflectJSON_tools.h / ReflectINI_tools.h check the version they were written for. Two different copies in one
- sketch therefore give a compile error instead of silently using the first one.
+Commercial licensing available under separate written agreement.
+
+See LICENSE and COMMERCIAL.md.
+
+Contains only what the Reflect libraries need in common: REFLECT / MEMBER / MEMBER_AS / COMMENT,
+FieldRef, fn() / fx(), the type traits (optional, numeric wrappers), shared number helpers,
+cppTypeName() and the number formatting used by ReflectJSON and ReflectINI
+(reflectFormatInt / reflectFormatReal: identical output in JSON and INI).
+
+Format-specific code lives in ReflectJSON_tools.h / ReflectINI_tools.h.
+Observer-specific code lives in ReflectObserver.h.
+
+IMPORTANT: ReflectJSON, ReflectINI and ReflectObserver each ship an identical copy of this file.
+The copies have different paths, so #pragma once cannot detect them as the same file:
+a classic include guard is used.
+
+REFLECTCORE_VERSION must be increased on every change (in BOTH places in this file:
+the check before the guard and the #define).
+
+Every copy checks its own version against the copy included first.
+ReflectJSON_tools.h, ReflectINI_tools.h and ReflectObserver.h also check the core version
+they were written for.
+
+Mixing libraries that ship different ReflectCore versions in one sketch therefore gives
+a compile error instead of silently using the first included copy.
 */
+
 // Outside the include guard: every copy compares ITS OWN version with the copy that was included first.
 // (Inside the guard the check would never run for the second copy.)
-#if defined(REFLECTCORE_VERSION) && (REFLECTCORE_VERSION != 5)
+
+#if defined(REFLECTCORE_VERSION) && (REFLECTCORE_VERSION != 6)
   #error "Two different ReflectCore.h versions in one build: update ReflectJSON and ReflectINI to the same ReflectCore.h"
 #endif
 
 #ifndef REFLECTCORE_H
 #define REFLECTCORE_H
 
-#define REFLECTCORE_VERSION 5
+#define REFLECTCORE_VERSION 6
 
 #define PM5_PRAGMA(x) _Pragma(#x)
 
@@ -150,6 +165,29 @@ REGION(REFLECT)
   * and the evaluated expression.
   */
   #define MEMBER_AS(key, expr) FieldRef<decltype((expr))>{ key, litLen(key), (expr) }
+
+  /**
+  * @brief A comment inside REFLECT(...), e.g. COMMENT("calibration value a").
+  *
+  * INIwriter writes it as "; text" line(s) in front of the next MEMBER: in front of the key, or in front of
+  * the [section] header if the next member is a struct (array of structs: in front of [name.0]). A COMMENT
+  * without a following MEMBER is written after the last key of the struct. If the member is omitted
+  * (empty std::optional, nullptr), its comment is omitted too. "\n" in the text starts a new
+  * comment line. INIreader and ReflectJSON (reader and writer) ignore comments.
+  *
+  * Only string literals are accepted (the text must live as long as the program).
+  */
+  struct ReflectComment {
+    const char *text;
+  };
+  #define COMMENT(text) ReflectComment{ "" text }
+
+  template<typename F>
+  inline constexpr bool is_reflect_comment_v = std::is_same_v<remove_cvref_t<F>, ReflectComment>;
+
+  // Number of real members (without COMMENT) in a REFLECT pack
+  template<typename... Fs>
+  inline constexpr size_t reflect_member_count_v = (size_t(0) + ... + size_t(!is_reflect_comment_v<Fs>));
   /**
   * @brief Enables reflection for a struct.
   *

@@ -556,7 +556,7 @@ private:
       if(!key && !_writeContext[_storage.depth].inArray){
         bool okFlat = true;
         value.reflect([&](auto&&... fields) {
-          okFlat = (... && setData(fields.value, fields.key));
+          okFlat = (... && setField(fields));
         });
         return okFlat && !_runtimeStatus.hasError();
       }
@@ -564,13 +564,23 @@ private:
 
       bool ok = true;
       value.reflect([&](auto&&... fields) {
-        ok = (... && setData(fields.value, fields.key));
+        ok = (... && setField(fields));
       });
 
       if(!ok) return false;
 
       closeInternal(false);
       return !_runtimeStatus.hasError();
+    }
+    // One REFLECT entry: a member, or COMMENT(...) (INI only, ignored in JSON)
+    template<typename FR>
+    FORCE_INLINE bool setField(const FR &f){
+      if constexpr (is_reflect_comment_v<FR>){
+        (void)f;
+        return true;
+      }else{
+        return setData(f.value, f.key);
+      }
     }
     template<typename T, size_t N>
     inline bool addArray(const T (&arr)[N], const char *key){
