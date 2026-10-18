@@ -12,7 +12,7 @@
   ],
   "license": "PolyForm-Noncommercial-1.0.0",
   "frameworks": "arduino",
-  "platforms": ["raspberrypi", "espressif32", "teensy", "renesas-ra"],
+  "platforms": "*",
   "build": { "flags": ["-std=gnu++17"], "unflags": ["-std=gnu++11", "-std=gnu++14"] },
   "headers": "ReflectJSON.h"
 }
