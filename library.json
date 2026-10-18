@@ -1,6 +1,6 @@
 {
   "name": "ReflectJSON",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Fast JSON writer and reader for microcontrollers with struct reflection, Kotlin-style config and pretty printing (C++17).",
   "keywords": "json, reflection, serialization, parser, writer, struct, embedded",
   "repository": {
